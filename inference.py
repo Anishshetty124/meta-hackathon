@@ -29,6 +29,14 @@ MAX_RETRIES = 3
 RETRY_BACKOFF = 1.0  # seconds
 
 
+def emit_event(tag: str, payload: Dict[str, Any]) -> None:
+    """Emit evaluator-friendly structured stdout event logs.
+
+    Required tags: START, STEP, END.
+    """
+    print(f"[{tag}] {json.dumps(payload, sort_keys=True)}", flush=True)
+
+
 def load_configuration() -> Tuple[str, str, str, str, bool, int]:
     """Load and validate required environment configuration.
 
@@ -347,13 +355,15 @@ Respond with ONLY valid JSON (no other text):
 
     try:
         logger.debug(f"Requesting recommendation from {model_name}")
-        response = client.messages.create(
+        # Prefer chat.completions for OpenAI-compatible endpoints.
+        response = client.chat.completions.create(
             model=model_name,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,
             max_tokens=LLM_MAX_TOKENS,
-            messages=[{"role": "user", "content": prompt}]
         )
 
-        raw_response = response.content[0].text if response.content else ""
+        raw_response = response.choices[0].message.content or ""
         logger.debug(f"LLM response: {raw_response[:100]}...")
 
         # Extract JSON from response
@@ -462,6 +472,17 @@ def run_training_episode(
         initial_obs = reset_environment(env_base_url, seed=reset_seed)
         episode_stats["initial_cost"] = initial_obs["monthly_cost"]
 
+        emit_event(
+            "START",
+            {
+                "episode": episode_number,
+                "seed": reset_seed,
+                "initial_cost": episode_stats["initial_cost"],
+                "model": model_name,
+                "mode": "heuristic" if client is None else "llm",
+            },
+        )
+
         task_completion = {"easy": False, "medium": False, "hard": False}
         current_observation = initial_obs
 
@@ -527,6 +548,21 @@ def run_training_episode(
                         f"Reward: {step_reward:+.2f}, Total: {episode_stats['total_reward']:+.2f}"
                     )
 
+                    emit_event(
+                        "STEP",
+                        {
+                            "episode": episode_number,
+                            "step": step,
+                            "command": command,
+                            "resource_id": resource_id,
+                            "reward": step_reward,
+                            "total_reward": round(episode_stats["total_reward"], 2),
+                            "monthly_cost": current_observation.get("monthly_cost", 0.0),
+                            "done": current_observation.get("done", False),
+                            "completed_tasks": current_observation.get("completed_tasks", []),
+                        },
+                    )
+
                     if current_observation.get("done", False):
                         logger.info("Episode done signal received")
                         episode_stats["success"] = True
@@ -559,6 +595,18 @@ def run_training_episode(
             f"Reward: {episode_stats['total_reward']:+.2f}, "
             f"Cost savings: ${episode_stats['cost_savings']:.2f}, "
             f"Tasks: {episode_stats['tasks_completed']}"
+        )
+
+        emit_event(
+            "END",
+            {
+                "episode": episode_number,
+                "success": episode_stats["success"],
+                "steps": episode_stats["steps"],
+                "total_reward": round(episode_stats["total_reward"], 2),
+                "cost_savings": round(episode_stats["cost_savings"], 2),
+                "task_scores": episode_stats["task_scores"],
+            },
         )
 
     except requests.RequestException as e:
