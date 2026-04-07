@@ -146,6 +146,28 @@ class Action(BaseModel):
         }
 
 
+class Reward(BaseModel):
+    """Typed reward model for step outcomes.
+
+    Keeps reward semantics explicit for grading and baseline reporting while
+    preserving the scalar signal used by the OpenEnv observation payload.
+    """
+    score: float = Field(
+        ...,
+        ge=-1.0,
+        le=1.0,
+        description="Scalar reward score from -1.0 to 1.0"
+    )
+    reason: Optional[str] = Field(
+        default=None,
+        description="Short reason describing why this reward was produced"
+    )
+    details: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Optional structured reward components"
+    )
+
+
 class Observation(BaseModel):
     """Environment state observed after an action is executed.
 

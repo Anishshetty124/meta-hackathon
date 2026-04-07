@@ -216,7 +216,7 @@ class CloudEnvironment:
         logger.debug(f"Initialized {len(resources)} resources")
         return resources
 
-    def step(self, action: Action) -> Tuple[Observation, bool]:
+    def step(self, action: Action) -> Tuple[Observation, float, bool, Dict[str, Any]]:
         """Execute one step in the environment.
 
         Processes the agent's action, updates infrastructure state, calculates
@@ -226,8 +226,7 @@ class CloudEnvironment:
             action: Agent action to execute
 
         Returns:
-            Tuple of (observation, done) where observation includes new state
-            and reward, and done indicates episode completion
+            Tuple of (observation, reward, done, info) aligned with OpenEnv step semantics
         """
         self.current_step += 1
         logger.debug(f"Step {self.current_step}: executing {action.command} on {action.resource_id}")
@@ -246,8 +245,17 @@ class CloudEnvironment:
         # Check if episode is complete
         done = self._is_episode_complete()
 
-        observation = self._build_observation(reward=reward, info=info)
-        return observation, done
+        observation = self._build_observation(reward=reward, info=info, done=done)
+        return observation, reward, done, info
+
+    def state(self) -> Observation:
+        """Return the current environment state without mutating it."""
+        done = self._is_episode_complete()
+        return self._build_observation(
+            reward=0.0,
+            info={"state_query": True},
+            done=done,
+        )
 
     def _execute_action(self, action: Action) -> Tuple[float, Dict[str, Any]]:
         """Execute an action and compute reward.
@@ -441,7 +449,10 @@ class CloudEnvironment:
             )
         else:
             # Downsized other instance - partial credit for Hard task
-            self.task_progress[TaskType.HARD].progress += 0.25
+            self.task_progress[TaskType.HARD].progress = min(
+                1.0,
+                self.task_progress[TaskType.HARD].progress + 0.25,
+            )
             reward = 0.25
             logger.info(
                 f"Downsized {resource.resource_id}: {old_type} -> {new_instance_type}, "
@@ -500,7 +511,10 @@ class CloudEnvironment:
         return all(task.completed for task in self.task_progress.values())
 
     def _build_observation(
-        self, reward: float = 0.0, info: Optional[Dict[str, Any]] = None
+        self,
+        reward: float = 0.0,
+        info: Optional[Dict[str, Any]] = None,
+        done: bool = False,
     ) -> Observation:
         """Construct environment observation for agent.
 
@@ -559,7 +573,7 @@ class CloudEnvironment:
             resources=list(self.resources.values()),
             monthly_cost=current_cost,
             reward=reward,
-            done=False,
+            done=done,
             completed_tasks=completed_task_types,
             progress=progress_dict,
             info=info,

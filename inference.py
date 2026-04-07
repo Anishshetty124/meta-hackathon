@@ -29,14 +29,14 @@ MAX_RETRIES = 3
 RETRY_BACKOFF = 1.0  # seconds
 
 
-def load_configuration() -> Tuple[str, str, str, str, bool]:
+def load_configuration() -> Tuple[str, str, str, str, bool, int]:
     """Load and validate required environment configuration.
 
     Reads environment endpoint, LLM endpoint, model name, and authentication token.
     Ensures all required variables are present before continuing.
 
     Returns:
-        Tuple of (env_base_url, llm_base_url, model_name, api_token, heuristic_only)
+        Tuple of (env_base_url, llm_base_url, model_name, api_token, heuristic_only, baseline_seed)
 
     Raises:
         ValueError: If any required environment variable is missing
@@ -50,6 +50,7 @@ def load_configuration() -> Tuple[str, str, str, str, bool]:
     hf_token = os.getenv("HF_TOKEN", "").strip()
     openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
     heuristic_only = os.getenv("BASELINE_MODE", "").strip().lower() == "heuristic"
+    baseline_seed_raw = os.getenv("BASELINE_SEED", "42").strip()
 
     # Accept either HF_TOKEN (hackathon instruction) or OPENAI_API_KEY (common OpenAI client pattern).
     api_token = hf_token or openai_api_key
@@ -63,15 +64,21 @@ def load_configuration() -> Tuple[str, str, str, str, bool]:
         errors.append("MODEL_NAME environment variable is required")
     if not api_token and not heuristic_only:
         errors.append("Either HF_TOKEN or OPENAI_API_KEY environment variable is required unless BASELINE_MODE=heuristic")
+    try:
+        baseline_seed = int(baseline_seed_raw)
+    except ValueError:
+        errors.append("BASELINE_SEED must be an integer")
+        baseline_seed = 42
 
     if errors:
         raise ValueError("; ".join(errors))
 
     logger.info(
         "Configuration loaded successfully "
-        f"(model={model_name}, env={env_base_url}, llm={llm_base_url}, heuristic_only={heuristic_only})"
+        f"(model={model_name}, env={env_base_url}, llm={llm_base_url}, "
+        f"heuristic_only={heuristic_only}, baseline_seed={baseline_seed})"
     )
-    return env_base_url, llm_base_url, model_name, api_token, heuristic_only
+    return env_base_url, llm_base_url, model_name, api_token, heuristic_only, baseline_seed
 
 
 def create_openai_client(model_name: str, api_token: str, llm_base_url: str) -> OpenAI:
@@ -102,7 +109,7 @@ def create_openai_client(model_name: str, api_token: str, llm_base_url: str) -> 
     return client
 
 
-def reset_environment(api_base_url: str) -> Dict[str, Any]:
+def reset_environment(api_base_url: str, seed: Optional[int] = None) -> Dict[str, Any]:
     """Reset environment to initial state with fresh episode.
 
     Makes synchronized HTTP request to reset endpoint. Handles network
@@ -110,6 +117,7 @@ def reset_environment(api_base_url: str) -> Dict[str, Any]:
 
     Args:
         api_base_url: Base URL of environment API
+        seed: Optional deterministic seed for reproducible resets
 
     Returns:
         Initial observation object
@@ -118,7 +126,7 @@ def reset_environment(api_base_url: str) -> Dict[str, Any]:
         requests.RequestException: If reset fails after retries
     """
     url = f"{api_base_url}/reset"
-    payload = {"seed": None, "difficulty": None}
+    payload = {"seed": seed, "difficulty": None}
 
     for attempt in range(MAX_RETRIES):
         try:
@@ -418,6 +426,7 @@ def run_training_episode(
     model_name: str,
     episode_number: int,
     max_steps: int,
+    reset_seed: Optional[int],
 ) -> Dict[str, Any]:
     """Execute one complete training episode.
 
@@ -430,6 +439,7 @@ def run_training_episode(
         model_name: Model identifier
         episode_number: Current episode number (1-indexed)
         max_steps: Maximum steps allowed per episode
+        reset_seed: Seed passed to /reset for deterministic episode initialization
 
     Returns:
         Episode statistics dictionary
@@ -449,7 +459,7 @@ def run_training_episode(
 
     try:
         # Initialize episode
-        initial_obs = reset_environment(env_base_url)
+        initial_obs = reset_environment(env_base_url, seed=reset_seed)
         episode_stats["initial_cost"] = initial_obs["monthly_cost"]
 
         task_completion = {"easy": False, "medium": False, "hard": False}
@@ -538,6 +548,11 @@ def run_training_episode(
         episode_stats["final_cost"] = current_observation.get("monthly_cost", 0.0)
         episode_stats["cost_savings"] = max(0, episode_stats["initial_cost"] - episode_stats["final_cost"])
         episode_stats["tasks_completed"] = [k for k, v in task_completion.items() if v]
+        episode_stats["task_scores"] = {
+            "easy": float(current_observation.get("progress", {}).get("easy", 0.0)),
+            "medium": float(current_observation.get("progress", {}).get("medium", 0.0)),
+            "hard": float(current_observation.get("progress", {}).get("hard", 0.0)),
+        }
 
         logger.info(
             f"Episode {episode_number} complete - "
@@ -562,7 +577,14 @@ def main() -> int:
     """
     try:
         # Load configuration
-        env_base_url, llm_base_url, model_name, api_token, heuristic_only = load_configuration()
+        (
+            env_base_url,
+            llm_base_url,
+            model_name,
+            api_token,
+            heuristic_only,
+            baseline_seed,
+        ) = load_configuration()
 
         # Create client unless explicitly running deterministic heuristic baseline.
         client: Optional[OpenAI] = None
@@ -577,12 +599,14 @@ def main() -> int:
 
         episode_results = []
         for episode_num in range(1, num_episodes + 1):
+            episode_seed = baseline_seed + (episode_num - 1)
             stats = run_training_episode(
                 env_base_url,
                 client,
                 model_name,
                 episode_num,
                 max_steps=100,
+                reset_seed=episode_seed,
             )
             episode_results.append(stats)
             
@@ -603,6 +627,17 @@ def main() -> int:
         logger.info(f"Episodes: {successful_episodes}/{num_episodes} successful")
         logger.info(f"Total reward: {total_reward:+.2f}")
         logger.info(f"Total cost savings: ${total_savings:.2f}")
+
+        easy_score = sum(r["task_scores"]["easy"] for r in episode_results) / num_episodes
+        medium_score = sum(r["task_scores"]["medium"] for r in episode_results) / num_episodes
+        hard_score = sum(r["task_scores"]["hard"] for r in episode_results) / num_episodes
+        baseline_score = (easy_score + medium_score + hard_score) / 3.0
+
+        logger.info(
+            "Baseline task scores (0.0-1.0): "
+            f"easy={easy_score:.2f}, medium={medium_score:.2f}, hard={hard_score:.2f}, "
+            f"aggregate={baseline_score:.2f}"
+        )
 
         for result in episode_results:
             logger.info(

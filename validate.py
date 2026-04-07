@@ -107,9 +107,9 @@ def test_environment() -> bool:
             resource_id="vol-unattached-001",
             parameters={}
         )
-        obs, done = env.step(action)
+        obs, reward, done, info = env.step(action)
         print(f"✓ Action executed successfully")
-        print(f"  Reward: {obs.reward:.2f}")
+        print(f"  Reward: {reward:.2f}")
         print(f"  New cost: ${obs.monthly_cost:.2f}")
         print(f"  Tasks completed: {len(obs.completed_tasks)}")
         

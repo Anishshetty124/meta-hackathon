@@ -131,10 +131,12 @@ async def step(request: StepRequest) -> Observation:
         logger.debug(
             f"Executing action: {request.action.command} on {request.action.resource_id}"
         )
-        observation, done = environment.step(request.action)
+        observation, reward, done, info = environment.step(request.action)
 
-        # Ensure done flag is properly set
+        # Keep API output self-consistent even if handlers evolve.
+        observation.reward = reward
         observation.done = done
+        observation.info = info
 
         if done:
             logger.info("Episode complete")
@@ -172,7 +174,7 @@ async def get_state() -> StateResponse:
         )
 
     try:
-        observation = environment._build_observation()
+        observation = environment.state()
 
         return StateResponse(
             observation=observation,
@@ -242,5 +244,11 @@ async def root() -> dict:
 
 
 if __name__ == "__main__":
+    logger.info("Starting Uvicorn server on 0.0.0.0:8000")
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+def run_server() -> None:
+    """Console script entry point for OpenEnv packaging checks."""
     logger.info("Starting Uvicorn server on 0.0.0.0:8000")
     uvicorn.run(app, host="0.0.0.0", port=8000)

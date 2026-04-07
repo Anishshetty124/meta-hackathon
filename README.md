@@ -249,6 +249,52 @@ python inference.py
 3. Space responds with HTTP 200 on `/health` and successful `POST /reset`.
 4. Run `python inference.py` with the same variables and keep logs for reproducibility evidence.
 
+## Submission Evidence
+
+This section records concrete evidence for the Round 1 functional and non-functional requirements.
+
+### Verified Evidence
+
+1. OpenEnv validation passed locally.
+  - Command: openenv validate
+  - Result: [OK] meta-hackathon: Ready for multi-mode deployment
+
+2. Hugging Face Space deployed and serving.
+  - Space: https://huggingface.co/spaces/anishshetty124/meta-hackathon
+  - Health endpoint: https://anishshetty124-meta-hackathon.hf.space/health
+  - Health response observed:
+    - status: healthy
+    - environment_initialized: true
+    - application: Cloud FinOps & Security Auditor
+    - version: 1.0.0
+
+3. Application startup logs confirmed in Space container logs.
+  - Started server process
+  - Application startup complete
+  - Uvicorn running on 0.0.0.0:8000
+  - GET /health returned HTTP 200
+
+4. OpenEnv metadata and deployment packaging present in repository.
+  - openenv.yaml available
+  - Dockerfile available
+  - README includes HF Spaces metadata with openenv tag
+
+### Final Evidence To Attach (for submission packet)
+
+1. API smoke test responses from deployed Space:
+  - POST /reset response sample
+  - POST /step response sample
+  - GET /state response sample
+
+2. Baseline run summary from inference.py:
+  - Task scores (easy, medium, hard) and aggregate score
+  - Total reward and cost savings over 3 episodes
+
+3. Screenshots:
+  - Space build logs showing successful startup
+  - /health response page
+  - openenv validate terminal output
+
 ## Environment State
 
 ### Resources
