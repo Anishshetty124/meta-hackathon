@@ -205,9 +205,14 @@ Baseline script: `inference.py` (root-level, OpenAI client compatible)
 
 The baseline emits structured stdout logs for evaluator parsing:
 
-- `[START]` at episode start (seed, initial cost, mode)
-- `[STEP]` on each action (command, reward, cost, task_scores)
-- `[END]` for episode and run summaries (total reward, cost savings, aggregate score)
+- `[START] task=<task_name> env=<benchmark> model=<model_name>`
+- `[STEP] step=<n> action=<action_str> reward=<0.00> done=<true|false> error=<msg|null>`
+- `[END] success=<true|false> steps=<n> score=<score> rewards=<r1,r2,...,rn>`
+
+Notes:
+- `reward` and `rewards` are formatted to 2 decimals
+- `done` and `success` are lowercase booleans
+- `error` is raw environment error text or `null`
 
 - Episodes: 3
 - Max steps per episode: 100
@@ -266,6 +271,14 @@ python inference.py
   - `HF_TOKEN=<secret>`
 3. Space responds with HTTP 200 on `/health` and successful `POST /reset`.
 4. Run `python inference.py` with the same variables and keep logs for reproducibility evidence.
+
+### Validator Script
+
+Run the pre-submission validator script to mirror gate checks:
+
+```bash
+bash scripts/validate-submission.sh https://anishshetty124-meta-hackathon.hf.space .
+```
 
 ## Submission Evidence
 
