@@ -135,14 +135,15 @@ observation:
 reward:
   type: number
   description: "Scalar reward signal per step"
-  range: [-0.30, 0.76]
+  range: [-0.30, 0.70]
   specification:
     easy_task: 0.35
     medium_task: 0.50
     hard_task: 0.60
-    dense_cost_shaping: 0.00-0.08
-    dense_risk_shaping: 0.00-0.08
-    repeat_action_penalty: -0.03 to -0.12
+    efficiency_bonus: 0.00-0.06
+    repeat_action_penalty: -0.03
+    stalled_episode_penalty: -0.05
+    reliability_risk_penalty: -0.12
     invalid_action: -0.05
     impossible_operation: -0.10
 
@@ -158,7 +159,6 @@ tasks:
       criteria: "Resource vol-unattached-001 must be deleted (removed from resources list)"
       success_signal: "Reward +0.35 and task marked complete"
       target_resource: vol-unattached-001
-      score_range: 0.0-1.0
     expected_steps: 1-3
     solved_by: "delete_resource command on unattached volume"
 
@@ -172,13 +172,12 @@ tasks:
       criteria: "Resource s3-public-bucket must have is_public=false"
       success_signal: "Reward +0.50 and task marked complete"
       target_resource: s3-public-bucket
-      score_range: 0.0-1.0
     expected_steps: 1-5
     solved_by: "make_private command on public S3 bucket"
 
   - name: hard
     title: "Downsize Oversized EC2 Instance"
-    description: "Optimize an expensive EC2 instance (i-expensive-prod, currently m5.2xlarge) that is significantly underutilized (CPU <50%). Downsizing from m5.2xlarge (~$180/mo) to t3.large (~$65/mo) saves ~$115/mo while maintaining capacity."
+    description: "Optimize an expensive EC2 instance (i-expensive-prod, currently m5.2xlarge) that is significantly underutilized (CPU <50%). The target is t3.large for safe right-sizing. Downsizing too aggressively (e.g., t3.micro/t3.small) incurs reliability-risk penalties."
     difficulty: hard
     reward: 0.60
     grader:
@@ -186,10 +185,9 @@ tasks:
       criteria: "Resource i-expensive-prod must have instance_type=t3.large"
       success_signal: "Reward +0.60 and task marked complete"
       target_resource: i-expensive-prod
-      score_range: 0.0-1.0
     expected_steps: 1-10
     solved_by: "downsize_instance command with new instance type parameter"
-    constraints: "Instance must have cpu_utilization < 50% and needs_fixing=true"
+    constraints: "Instance must have cpu_utilization < 50% and needs_fixing=true; safe target for production is t3.large"
 
 # Episode configuration
 episode:

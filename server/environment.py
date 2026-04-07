@@ -92,9 +92,8 @@ class CloudEnvironment:
         self.current_step = 0
         self.resources: Dict[str, Resource] = {}
         self.initial_cost = 0.0
-        self.action_history: List[Tuple[str, str]] = []
         self.last_action_signature: Optional[Tuple[str, str]] = None
-        self.repeat_action_streak = 0
+        self.no_progress_steps = 0
 
         # Initialize task tracking
         self.task_progress: Dict[TaskType, TaskProgress] = {
@@ -126,9 +125,8 @@ class CloudEnvironment:
         self.current_step = 0
         self.resources = self._initialize_resources()
         self.initial_cost = self._calculate_total_cost()
-        self.action_history = []
         self.last_action_signature = None
-        self.repeat_action_streak = 0
+        self.no_progress_steps = 0
 
         # Reset task progress
         for task_type in TaskType:
@@ -237,11 +235,9 @@ class CloudEnvironment:
         self.current_step += 1
         logger.debug(f"Step {self.current_step}: executing {action.command} on {action.resource_id}")
 
-        pre_cost = self._calculate_total_cost()
-        pre_open_issues = self._count_open_issues()
-
         reward = 0.0
         info: Dict[str, Any] = {}
+        previous_cost = self._calculate_total_cost()
 
         # Validate resource exists
         if action.resource_id not in self.resources:
@@ -251,119 +247,19 @@ class CloudEnvironment:
         else:
             reward, info = self._execute_action(action)
 
-        shaping_reward, shaping_info = self._calculate_shaping_reward(pre_cost, pre_open_issues)
-        reward += shaping_reward
+        reward, shaping_info = self._apply_reward_shaping(
+            action=action,
+            base_reward=reward,
+            previous_cost=previous_cost,
+            info=info,
+        )
         info.update(shaping_info)
-
-        repeat_penalty = self._calculate_repeat_penalty(action)
-        reward += repeat_penalty
-        if repeat_penalty < 0:
-            info["repeat_action_penalty"] = round(repeat_penalty, 2)
-
-        task_scores = self._grade_tasks()
-        info["task_scores"] = task_scores
-        info["operational_scores"] = self._calculate_operational_scores()
-
-        reward = round(max(-1.0, min(1.0, reward)), 2)
 
         # Check if episode is complete
         done = self._is_episode_complete()
 
         observation = self._build_observation(reward=reward, info=info, done=done)
         return observation, reward, done, info
-
-    def _count_open_issues(self) -> int:
-        """Return number of open optimization and security issues."""
-        return sum(1 for resource in self.resources.values() if resource.needs_fixing)
-
-    def _calculate_shaping_reward(self, pre_cost: float, pre_open_issues: int) -> Tuple[float, Dict[str, Any]]:
-        """Provide dense reward for incremental cost and risk improvements."""
-        post_cost = self._calculate_total_cost()
-        post_open_issues = self._count_open_issues()
-
-        cost_saved = max(0.0, pre_cost - post_cost)
-        issues_reduced = max(0, pre_open_issues - post_open_issues)
-
-        cost_reward = min(0.08, cost_saved / 200.0)
-        risk_reward = min(0.08, issues_reduced * 0.04)
-        shaping_reward = round(cost_reward + risk_reward, 2)
-
-        return shaping_reward, {
-            "cost_shaping_reward": round(cost_reward, 2),
-            "risk_shaping_reward": round(risk_reward, 2),
-            "cost_saved_this_step": round(cost_saved, 2),
-            "issues_reduced_this_step": int(issues_reduced),
-        }
-
-    def _calculate_repeat_penalty(self, action: Action) -> float:
-        """Penalize repeated action loops to discourage unproductive behavior."""
-        signature = (action.command.lower(), action.resource_id)
-        self.action_history.append(signature)
-
-        if self.last_action_signature == signature:
-            self.repeat_action_streak += 1
-        else:
-            self.repeat_action_streak = 0
-
-        self.last_action_signature = signature
-
-        if self.repeat_action_streak <= 0:
-            return 0.0
-
-        return round(-0.03 * min(4, self.repeat_action_streak), 2)
-
-    def _grade_tasks(self) -> Dict[str, float]:
-        """Programmatic deterministic graders for easy/medium/hard tasks."""
-        easy_score = 0.0 if "vol-unattached-001" in self.resources else 1.0
-
-        medium_score = 0.0
-        medium_resource = self.resources.get("s3-public-bucket")
-        if medium_resource is None or not medium_resource.is_public:
-            medium_score = 1.0
-
-        hard_score = 0.0
-        hard_resource = self.resources.get("i-expensive-prod")
-        if hard_resource is not None:
-            target_cost = self.INSTANCE_TYPE_COSTS["t3.large"]
-            current_cost = hard_resource.monthly_cost
-            if hard_resource.instance_type == "t3.large":
-                hard_score = 1.0
-            elif current_cost > target_cost:
-                hard_score = min(0.95, max(0.0, (180.0 - current_cost) / (180.0 - target_cost)))
-
-        return {
-            "easy": round(easy_score, 2),
-            "medium": round(medium_score, 2),
-            "hard": round(hard_score, 2),
-        }
-
-    def _calculate_operational_scores(self) -> Dict[str, float]:
-        """Return practical KPI-style scores for cost and governance quality."""
-        current_cost = self._calculate_total_cost()
-        cost_reduction = max(0.0, self.initial_cost - current_cost)
-        cost_efficiency = min(1.0, cost_reduction / 130.0)
-
-        public_bucket_count = sum(
-            1
-            for resource in self.resources.values()
-            if resource.resource_type == ResourceType.S3_BUCKET and resource.is_public
-        )
-        security_posture = 1.0 if public_bucket_count == 0 else 0.0
-
-        orphaned_volume_count = sum(
-            1
-            for resource in self.resources.values()
-            if resource.resource_type == ResourceType.EBS_VOLUME and not resource.is_attached
-        )
-        hygiene_score = 1.0 if orphaned_volume_count == 0 else 0.0
-
-        overall = (cost_efficiency + security_posture + hygiene_score) / 3.0
-        return {
-            "cost_efficiency": round(cost_efficiency, 2),
-            "security_posture": round(security_posture, 2),
-            "resource_hygiene": round(hygiene_score, 2),
-            "overall": round(overall, 2),
-        }
 
     def state(self) -> Observation:
         """Return the current environment state without mutating it."""
@@ -608,6 +504,66 @@ class CloudEnvironment:
 
         return False
 
+    def _apply_reward_shaping(
+        self,
+        action: Action,
+        base_reward: float,
+        previous_cost: float,
+        info: Dict[str, Any],
+    ) -> Tuple[float, Dict[str, Any]]:
+        """Apply trajectory-level shaping signals for better agent learning.
+
+        Adds:
+        - cost-efficiency bonus for measurable savings
+        - repeated-action penalty to discourage loops
+        - stalled-episode penalty after repeated no-progress steps
+        - reliability penalty for unsafe production downsizing
+        """
+        shaped_reward = base_reward
+        current_cost = self._calculate_total_cost()
+        cost_saved = max(0.0, previous_cost - current_cost)
+        shaping_info: Dict[str, Any] = {}
+
+        if cost_saved > 0.0 and shaped_reward >= 0.0:
+            efficiency_bonus = min(0.06, cost_saved / 2000.0)
+            shaped_reward += efficiency_bonus
+            shaping_info["efficiency_bonus"] = round(efficiency_bonus, 3)
+
+        action_signature = (action.command, action.resource_id)
+        if self.last_action_signature == action_signature:
+            shaped_reward -= 0.03
+            shaping_info["repeat_action_penalty"] = -0.03
+        self.last_action_signature = action_signature
+
+        task_completed = info.get("task_completed")
+        if task_completed is None and cost_saved == 0.0:
+            self.no_progress_steps += 1
+        else:
+            self.no_progress_steps = 0
+
+        if self.no_progress_steps >= 5:
+            shaped_reward -= 0.05
+            shaping_info["stalled_episode_penalty"] = -0.05
+
+        if (
+            action.command == "downsize_instance"
+            and action.resource_id == "i-expensive-prod"
+            and info.get("success")
+            and info.get("new_instance_type") in {"t3.micro", "t3.small"}
+        ):
+            shaped_reward -= 0.12
+            shaping_info["reliability_risk_penalty"] = -0.12
+
+        shaped_reward = max(-1.0, min(1.0, round(shaped_reward, 4)))
+        return shaped_reward, shaping_info
+
+    def _task_scorecard(self) -> Dict[str, float]:
+        """Return deterministic task scores between 0.0 and 1.0."""
+        return {
+            task_type.value: round(task.progress, 3)
+            for task_type, task in self.task_progress.items()
+        }
+
     def _calculate_total_cost(self) -> float:
         """Calculate total monthly infrastructure cost.
 
@@ -683,6 +639,9 @@ class CloudEnvironment:
             "initial_cost": round(self.initial_cost, 2),
             "current_cost": current_cost,
             "cost_reduction_percent": round(cost_reduction_pct, 2),
+            "task_scores": self._task_scorecard(),
+            "overall_score": round(sum(progress_dict.values()) / 3.0, 3),
+            "open_issues": num_issues,
         })
 
         return Observation(

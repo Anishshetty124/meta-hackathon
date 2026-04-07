@@ -182,25 +182,38 @@ Rewards are designed to guide agents toward realistic optimization:
 - **Easy Task** (Delete unattached volume): `+0.35` for completion
 - **Medium Task** (Make S3 bucket private): `+0.50` for completion
 - **Hard Task** (Downsize instance): `+0.60` for specific resource, `+0.25` incremental
-- **Dense shaping**: `+0.00` to `+0.08` for measurable cost reduction, `+0.00` to `+0.08` for issue reduction
+- **Efficiency Bonus**: up to `+0.06` for measurable cost reduction in a single step
 
 Penalties:
 - Invalid actions: `-0.05` to `-0.15`
 - Attempting impossible operations: `-0.10` to `-0.15`
-- Repeating the same action on the same resource (anti-loop): up to `-0.12`
+- Repeating the same action on the same resource: `-0.03`
+- Prolonged no-progress loops (5+ steps): `-0.05`
+- Unsafe production downsize (over-aggressive right-sizing): `-0.12`
 
-Deterministic grader scores (`easy`, `medium`, `hard`) and operational KPIs (`cost_efficiency`, `security_posture`, `resource_hygiene`) are emitted in `observation.info` on every step.
+This shaping gives useful dense signals while preserving clear task-level completion rewards.
+
+## Grader Determinism
+
+- Task graders are deterministic and encoded in `openenv.yaml` criteria.
+- Runtime observations include deterministic per-task scorecard in `info.task_scores` (`easy`, `medium`, `hard`, each 0.0-1.0).
+- `info.overall_score` is the mean of task scores and can be used as an aggregate grader metric.
 
 ## Baseline Scores (Reproducible)
 
 Baseline script: `inference.py` (root-level, OpenAI client compatible)
+
+The baseline emits structured stdout logs for evaluator parsing:
+
+- `[START]` at episode start (seed, initial cost, mode)
+- `[STEP]` on each action (command, reward, cost, task_scores)
+- `[END]` for episode and run summaries (total reward, cost savings, aggregate score)
 
 - Episodes: 3
 - Max steps per episode: 100
 - Expected optimal total reward: `1.45` per episode
 - Expected optimal final monthly cost: `$235.00` (from `$365.00`)
 - Expected optimal cost savings: `$130.00` (~35.6%)
-- Structured evaluator logs: emits `[START]`, `[STEP]`, and `[END]` events as JSON lines to stdout
 
 To reproduce baseline:
 

@@ -30,10 +30,7 @@ RETRY_BACKOFF = 1.0  # seconds
 
 
 def emit_event(tag: str, payload: Dict[str, Any]) -> None:
-    """Emit evaluator-friendly structured stdout event logs.
-
-    Required tags: START, STEP, END.
-    """
+    """Emit evaluator-friendly structured stdout log lines."""
     print(f"[{tag}] {json.dumps(payload, sort_keys=True)}", flush=True)
 
 
@@ -355,15 +352,13 @@ Respond with ONLY valid JSON (no other text):
 
     try:
         logger.debug(f"Requesting recommendation from {model_name}")
-        # Prefer chat.completions for OpenAI-compatible endpoints.
-        response = client.chat.completions.create(
+        response = client.messages.create(
             model=model_name,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.0,
             max_tokens=LLM_MAX_TOKENS,
+            messages=[{"role": "user", "content": prompt}]
         )
 
-        raw_response = response.choices[0].message.content or ""
+        raw_response = response.content[0].text if response.content else ""
         logger.debug(f"LLM response: {raw_response[:100]}...")
 
         # Extract JSON from response
@@ -472,21 +467,20 @@ def run_training_episode(
         initial_obs = reset_environment(env_base_url, seed=reset_seed)
         episode_stats["initial_cost"] = initial_obs["monthly_cost"]
 
+        task_completion = {"easy": False, "medium": False, "hard": False}
+        current_observation = initial_obs
+
+        logger.info(f"Episode started - Initial cost: ${episode_stats['initial_cost']:.2f}")
         emit_event(
             "START",
             {
                 "episode": episode_number,
                 "seed": reset_seed,
-                "initial_cost": episode_stats["initial_cost"],
-                "model": model_name,
-                "mode": "heuristic" if client is None else "llm",
+                "initial_cost": round(episode_stats["initial_cost"], 2),
+                "max_steps": max_steps,
+                "mode": "heuristic" if client is None else "llm_fallback",
             },
         )
-
-        task_completion = {"easy": False, "medium": False, "hard": False}
-        current_observation = initial_obs
-
-        logger.info(f"Episode started - Initial cost: ${episode_stats['initial_cost']:.2f}")
 
         # Action loop
         for step in range(1, max_steps + 1):
@@ -547,7 +541,6 @@ def run_training_episode(
                         f"  → Action: {command} on {resource_id}, "
                         f"Reward: {step_reward:+.2f}, Total: {episode_stats['total_reward']:+.2f}"
                     )
-
                     emit_event(
                         "STEP",
                         {
@@ -555,11 +548,12 @@ def run_training_episode(
                             "step": step,
                             "command": command,
                             "resource_id": resource_id,
-                            "reward": step_reward,
-                            "total_reward": round(episode_stats["total_reward"], 2),
-                            "monthly_cost": current_observation.get("monthly_cost", 0.0),
-                            "done": current_observation.get("done", False),
+                            "reward": round(step_reward, 4),
+                            "total_reward": round(episode_stats["total_reward"], 4),
+                            "monthly_cost": round(current_observation.get("monthly_cost", 0.0), 2),
+                            "done": bool(current_observation.get("done", False)),
                             "completed_tasks": current_observation.get("completed_tasks", []),
+                            "task_scores": current_observation.get("info", {}).get("task_scores", {}),
                         },
                     )
 
@@ -596,15 +590,15 @@ def run_training_episode(
             f"Cost savings: ${episode_stats['cost_savings']:.2f}, "
             f"Tasks: {episode_stats['tasks_completed']}"
         )
-
         emit_event(
             "END",
             {
                 "episode": episode_number,
                 "success": episode_stats["success"],
                 "steps": episode_stats["steps"],
-                "total_reward": round(episode_stats["total_reward"], 2),
+                "total_reward": round(episode_stats["total_reward"], 4),
                 "cost_savings": round(episode_stats["cost_savings"], 2),
+                "tasks_completed": episode_stats["tasks_completed"],
                 "task_scores": episode_stats["task_scores"],
             },
         )
@@ -685,6 +679,22 @@ def main() -> int:
             "Baseline task scores (0.0-1.0): "
             f"easy={easy_score:.2f}, medium={medium_score:.2f}, hard={hard_score:.2f}, "
             f"aggregate={baseline_score:.2f}"
+        )
+        emit_event(
+            "END",
+            {
+                "run_summary": True,
+                "episodes": num_episodes,
+                "successful_episodes": successful_episodes,
+                "total_reward": round(total_reward, 4),
+                "total_cost_savings": round(total_savings, 2),
+                "task_scores": {
+                    "easy": round(easy_score, 3),
+                    "medium": round(medium_score, 3),
+                    "hard": round(hard_score, 3),
+                },
+                "aggregate_score": round(baseline_score, 3),
+            },
         )
 
         for result in episode_results:
