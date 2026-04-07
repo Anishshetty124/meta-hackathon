@@ -60,6 +60,24 @@ def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> No
     )
 
 
+def parse_json_response(response: requests.Response, context: str) -> Dict[str, Any]:
+    """Safely parse HTTP JSON responses with actionable error details."""
+    try:
+        data = response.json()
+    except ValueError as e:
+        body_preview = (response.text or "")[:300]
+        raise ValueError(
+            f"{context} returned invalid JSON (status={response.status_code}): {body_preview}"
+        ) from e
+
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"{context} returned unexpected JSON shape: {type(data).__name__}"
+        )
+
+    return data
+
+
 def load_configuration() -> Tuple[str, str, str, str, bool, int]:
     """Load and validate required environment configuration.
 
@@ -179,8 +197,9 @@ def reset_environment(api_base_url: str, seed: Optional[int] = None) -> Dict[str
                 timeout=API_REQUEST_TIMEOUT,
             )
             response.raise_for_status()
+            data = parse_json_response(response, "POST /reset")
             logger.info(f"Environment reset successfully (attempt {attempt + 1})")
-            return response.json()
+            return data
 
         except requests.RequestException as e:
             if attempt < MAX_RETRIES - 1:
@@ -213,7 +232,7 @@ def get_environment_state(api_base_url: str) -> Dict[str, Any]:
     try:
         response = requests.get(url, timeout=API_REQUEST_TIMEOUT)
         response.raise_for_status()
-        return response.json()
+        return parse_json_response(response, "GET /state")
     except requests.RequestException as e:
         logger.error(f"Failed to get environment state: {e}")
         raise
@@ -260,7 +279,7 @@ def execute_action(
         )
         response.raise_for_status()
         logger.debug(f"Action executed: {command} on {resource_id}")
-        return response.json()
+        return parse_json_response(response, "POST /step")
 
     except requests.exceptions.HTTPError as e:
         if e.response.status_code == 400:
@@ -369,7 +388,11 @@ def get_model_recommendation(
         Parsed action dictionary or None if LLM fails
     """
     completed_tasks = [name for name, done in task_completion.items() if done]
-    resources_json = json.dumps(observation["resources"], indent=2)
+    resources = observation.get("resources", []) if isinstance(observation, dict) else []
+    try:
+        resources_json = json.dumps(resources, indent=2)
+    except (TypeError, ValueError):
+        resources_json = "[]"
 
     prompt = f"""You are a Cloud FinOps & Security Auditor. Analyze this infrastructure and recommend one optimization action.
 
@@ -412,6 +435,9 @@ Respond with ONLY valid JSON (no other text):
         if json_start >= 0 and json_end > json_start:
             json_str = raw_response[json_start:json_end]
             parsed = json.loads(json_str)
+            if not isinstance(parsed, dict):
+                logger.warning("LLM response JSON was not an object")
+                return None
             logger.info(f"LLM recommended: {parsed.get('command')} on {parsed.get('resource_id')}")
             return parsed
 

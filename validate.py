@@ -6,6 +6,7 @@ import sys
 import time
 import json
 from pathlib import Path
+from typing import Any, Dict
 
 
 def validate_dependencies() -> bool:
@@ -126,6 +127,22 @@ def test_api_endpoints() -> bool:
         True if API endpoints work
     """
     print("\nTesting API endpoints (requires running server on localhost:8000)...")
+
+    def parse_json_response(resp: Any, context: str) -> Dict[str, Any]:
+        """Parse HTTP JSON safely with useful context in errors."""
+        try:
+            payload = resp.json()
+        except ValueError as e:
+            body_preview = (getattr(resp, "text", "") or "")[:300]
+            raise ValueError(
+                f"{context} returned invalid JSON (status={resp.status_code}): {body_preview}"
+            ) from e
+
+        if not isinstance(payload, dict):
+            raise ValueError(f"{context} returned unexpected JSON shape: {type(payload).__name__}")
+
+        return payload
+
     try:
         import requests
         
@@ -145,9 +162,9 @@ def test_api_endpoints() -> bool:
         # Test reset endpoint
         resp = requests.post("http://localhost:8000/reset", timeout=5)
         if resp.status_code == 200:
-            obs = resp.json()
+            obs = parse_json_response(resp, "POST /reset")
             print(f"✓ POST /reset works")
-            print(f"  Initial cost: ${obs['monthly_cost']:.2f}")
+            print(f"  Initial cost: ${float(obs.get('monthly_cost', 0.0)):.2f}")
         else:
             print(f"✗ POST /reset returned {resp.status_code}")
             return False
@@ -164,10 +181,10 @@ def test_api_endpoints() -> bool:
             timeout=5
         )
         if resp.status_code == 200:
-            obs = resp.json()
+            obs = parse_json_response(resp, "POST /step")
             print(f"✓ POST /step works")
-            print(f"  Reward: {obs['reward']:.2f}")
-            print(f"  New cost: ${obs['monthly_cost']:.2f}")
+            print(f"  Reward: {float(obs.get('reward', 0.0)):.2f}")
+            print(f"  New cost: ${float(obs.get('monthly_cost', 0.0)):.2f}")
         else:
             print(f"✗ POST /step returned {resp.status_code}")
             return False
@@ -175,9 +192,11 @@ def test_api_endpoints() -> bool:
         # Test state endpoint
         resp = requests.get("http://localhost:8000/state", timeout=5)
         if resp.status_code == 200:
-            state = resp.json()
+            state = parse_json_response(resp, "GET /state")
             print(f"✓ GET /state works")
-            print(f"  Episode step: {state['episode_step']}/{state['max_steps']}")
+            print(
+                f"  Episode step: {state.get('episode_step', 0)}/{state.get('max_steps', 0)}"
+            )
         else:
             print(f"✗ GET /state returned {resp.status_code}")
             return False

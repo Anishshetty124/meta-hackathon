@@ -198,21 +198,37 @@ def example_http_api_integration():
     print("=" * 60)
     
     api_url = "http://localhost:8000"
+
+    def parse_json_response(resp, context: str) -> dict:
+        """Parse HTTP JSON safely with useful context in errors."""
+        try:
+            payload = resp.json()
+        except ValueError as e:
+            body_preview = (getattr(resp, "text", "") or "")[:300]
+            raise ValueError(
+                f"{context} returned invalid JSON (status={resp.status_code}): {body_preview}"
+            ) from e
+
+        if not isinstance(payload, dict):
+            raise ValueError(f"{context} returned unexpected JSON shape: {type(payload).__name__}")
+
+        return payload
     
     try:
         # Test health endpoint
         resp = requests.get(f"{api_url}/health", timeout=2)
         if resp.status_code == 200:
+            health = parse_json_response(resp, "GET /health")
             print(f"\n✓ Server is healthy")
-            print(f"  {resp.json()}")
+            print(f"  {health}")
         
         # Reset environment
         resp = requests.post(f"{api_url}/reset", json={"seed": None}, timeout=5)
         if resp.status_code == 200:
-            initial_obs = resp.json()
+            initial_obs = parse_json_response(resp, "POST /reset")
             print(f"\n✓ Reset successful")
-            print(f"  Initial Cost: ${initial_obs['monthly_cost']:.2f}")
-            print(f"  Resources: {len(initial_obs['resources'])}")
+            print(f"  Initial Cost: ${float(initial_obs.get('monthly_cost', 0.0)):.2f}")
+            print(f"  Resources: {len(initial_obs.get('resources', []))}")
         
         # Step with action
         action_data = {
@@ -224,10 +240,10 @@ def example_http_api_integration():
         }
         resp = requests.post(f"{api_url}/step", json=action_data, timeout=5)
         if resp.status_code == 200:
-            step_obs = resp.json()
+            step_obs = parse_json_response(resp, "POST /step")
             print(f"\n✓ Step successful")
-            print(f"  Reward: {step_obs['reward']:.2f}")
-            print(f"  New Cost: ${step_obs['monthly_cost']:.2f}")
+            print(f"  Reward: {float(step_obs.get('reward', 0.0)):.2f}")
+            print(f"  New Cost: ${float(step_obs.get('monthly_cost', 0.0)):.2f}")
         
     except requests.exceptions.ConnectionError:
         print(f"\n✗ Could not connect to API at {api_url}")
