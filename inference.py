@@ -8,6 +8,7 @@ reliability to complete three optimization tasks.
 import json
 import logging
 import os
+import sys
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -17,7 +18,8 @@ from openai import OpenAI
 # Configure structured logging
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    stream=sys.stderr,
 )
 logger = logging.getLogger(__name__)
 
