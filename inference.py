@@ -31,7 +31,7 @@ RETRY_BACKOFF = 1.0  # seconds
 
 def emit_event(tag: str, payload: Dict[str, Any]) -> None:
     """Emit evaluator-friendly structured stdout log lines."""
-    print(f"[{tag}] {json.dumps(payload, sort_keys=True)}", flush=True)
+    print(f"[{tag}] {json.dumps(payload)}", flush=True)
 
 
 def load_configuration() -> Tuple[str, str, str, str, bool, int]:
