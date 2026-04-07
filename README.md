@@ -1,3 +1,17 @@
+---
+title: Cloud FinOps Auditor
+emoji: "☁️"
+colorFrom: blue
+colorTo: green
+sdk: docker
+app_port: 8000
+pinned: false
+tags:
+  - openenv
+  - finops
+  - security
+---
+
 # Cloud FinOps & Security Auditor
 
 OpenEnv-compatible simulator for cloud infrastructure optimization using AI agents.
@@ -190,6 +204,7 @@ set API_BASE_URL=https://api-inference.huggingface.co/openai/v1
 set ENV_BASE_URL=http://localhost:8000
 set MODEL_NAME=meta-llama/Llama-2-7b-chat
 set HF_TOKEN=your_token_here
+set BASELINE_SEED=42
 # Optional fallback for OpenAI-style env naming:
 # set OPENAI_API_KEY=your_token_here
 python inference.py
@@ -202,6 +217,7 @@ export API_BASE_URL=https://api-inference.huggingface.co/openai/v1
 export ENV_BASE_URL=http://localhost:8000
 export MODEL_NAME=meta-llama/Llama-2-7b-chat
 export HF_TOKEN=your_token_here
+export BASELINE_SEED=42
 python inference.py
 ```
 
@@ -211,6 +227,7 @@ Deterministic local baseline without external LLM calls:
 set ENV_BASE_URL=http://localhost:8000
 set MODEL_NAME=meta-llama/Llama-2-7b-chat
 set BASELINE_MODE=heuristic
+set BASELINE_SEED=42
 python inference.py
 ```
 
