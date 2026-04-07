@@ -295,6 +295,14 @@ class CloudEnvironment:
             elif command == "downsize_instance":
                 new_instance_type = action.parameters.get("instance_type", "t3.medium")
                 reward, info = self._handle_downsize_instance(resource, new_instance_type, info)
+            elif command == "upsize_instance":
+                new_instance_type = action.parameters.get("instance_type", "m5.large")
+                reward, info = self._handle_upsize_instance(resource, new_instance_type, info)
+            elif command == "attach_resource":
+                target_instance_id = action.parameters.get("instance_id", "i-moderate-app")
+                reward, info = self._handle_attach_resource(resource, target_instance_id, info)
+            elif command == "detach_resource":
+                reward, info = self._handle_detach_resource(resource, info)
             else:
                 reward = -0.05
                 info["error"] = f"Unknown command: {command}"
@@ -304,6 +312,98 @@ class CloudEnvironment:
             info["error"] = str(e)
 
         return reward, info
+
+    def _handle_upsize_instance(
+        self,
+        resource: Resource,
+        new_instance_type: str,
+        info: Dict[str, Any],
+    ) -> Tuple[float, Dict[str, Any]]:
+        """Handle EC2 upsizing for reliability-sensitive workloads."""
+        if resource.resource_type != ResourceType.EC2_INSTANCE:
+            return -0.1, {**info, "error": f"Can only upsize EC2 instances, not {resource.resource_type}"}
+
+        if new_instance_type not in self.INSTANCE_TYPE_COSTS:
+            return -0.1, {**info, "error": f"Unknown instance type: {new_instance_type}"}
+
+        new_cost = self.INSTANCE_TYPE_COSTS[new_instance_type]
+        current_cost = resource.monthly_cost
+        if new_cost <= current_cost:
+            return -0.12, {
+                **info,
+                "error": f"Upsize target {new_instance_type} must be more expensive than current type",
+            }
+
+        old_type = resource.instance_type
+        resource.instance_type = new_instance_type
+        resource.monthly_cost = new_cost
+        cost_increase = new_cost - current_cost
+
+        # Only high-utilization workloads justify upsizing; otherwise penalize waste.
+        cpu_util = resource.cpu_utilization or 0.0
+        if cpu_util >= 70.0:
+            reward = 0.08
+            reliability_note = "High utilization justified capacity increase"
+        else:
+            reward = -0.12
+            reliability_note = "Upsize increased cost without utilization evidence"
+
+        info.update({
+            "success": True,
+            "old_instance_type": old_type,
+            "new_instance_type": new_instance_type,
+            "cost_increase": round(cost_increase, 2),
+            "reliability_note": reliability_note,
+        })
+        return reward, info
+
+    def _handle_attach_resource(
+        self,
+        resource: Resource,
+        target_instance_id: str,
+        info: Dict[str, Any],
+    ) -> Tuple[float, Dict[str, Any]]:
+        """Attach an unattached EBS volume to an existing instance."""
+        if resource.resource_type != ResourceType.EBS_VOLUME:
+            return -0.1, {**info, "error": f"Can only attach EBS volumes, not {resource.resource_type}"}
+
+        if resource.is_attached:
+            return -0.05, {**info, "warning": "Volume is already attached"}
+
+        target = self.resources.get(target_instance_id)
+        if not target or target.resource_type != ResourceType.EC2_INSTANCE:
+            return -0.1, {**info, "error": f"Target instance {target_instance_id} not found"}
+
+        resource.is_attached = True
+        # Attaching a previously orphaned volume resolves waste and risk signal.
+        was_issue = resource.needs_fixing
+        resource.needs_fixing = False
+
+        reward = 0.12 if was_issue else 0.03
+        info.update({
+            "success": True,
+            "attached_to": target_instance_id,
+            "issue_resolved": was_issue,
+        })
+        return reward, info
+
+    def _handle_detach_resource(
+        self,
+        resource: Resource,
+        info: Dict[str, Any],
+    ) -> Tuple[float, Dict[str, Any]]:
+        """Detach an attached EBS volume from a workload."""
+        if resource.resource_type != ResourceType.EBS_VOLUME:
+            return -0.1, {**info, "error": f"Can only detach EBS volumes, not {resource.resource_type}"}
+
+        if not resource.is_attached:
+            return -0.05, {**info, "warning": "Volume is already detached"}
+
+        resource.is_attached = False
+        # Detached-but-not-deleted resources tend to become cost leaks.
+        resource.needs_fixing = True
+        info.update({"success": True, "warning": "Detached volume may become orphaned cost"})
+        return -0.02, info
 
     def _handle_delete_resource(
         self, resource: Resource, info: Dict[str, Any]
@@ -635,6 +735,7 @@ class CloudEnvironment:
         )
 
         # Add financial tracking to info
+        last_action_error = info.get("error")
         info.update({
             "initial_cost": round(self.initial_cost, 2),
             "current_cost": current_cost,
@@ -642,6 +743,7 @@ class CloudEnvironment:
             "task_scores": self._task_scorecard(),
             "overall_score": round(sum(progress_dict.values()) / 3.0, 3),
             "open_issues": num_issues,
+            "last_action_error": last_action_error,
         })
 
         return Observation(

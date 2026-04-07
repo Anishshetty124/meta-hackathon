@@ -561,7 +561,7 @@ def run_training_episode(
 
                     action_str = f"{command}({resource_id})"
                     step_done = bool(current_observation.get("done", False))
-                    step_error = current_observation.get("info", {}).get("error")
+                    step_error = current_observation.get("info", {}).get("last_action_error")
                     log_step(
                         step=step,
                         action=action_str,
