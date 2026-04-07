@@ -29,6 +29,7 @@ LLM_MAX_TOKENS = 500
 DEFAULT_STEP_DELAY = 0.5  # seconds between steps for rate limiting
 MAX_RETRIES = 3
 RETRY_BACKOFF = 1.0  # seconds
+DEFAULT_MODEL_NAME = "meta-llama/Llama-2-7b-chat"
 TASK_NAME = os.getenv("TASK_NAME", "cloud-finops-auditor")
 BENCHMARK = os.getenv("BENCHMARK", "openenv")
 MAX_STEPS = 100
@@ -76,7 +77,7 @@ def load_configuration() -> Tuple[str, str, str, str, bool, int]:
     # - ENV_BASE_URL is the environment endpoint (step/reset/state)
     llm_base_url = os.getenv("API_BASE_URL", "https://api-inference.huggingface.co/openai/v1").strip()
     env_base_url = os.getenv("ENV_BASE_URL", "http://localhost:8000").strip()
-    model_name = os.getenv("MODEL_NAME", "").strip()
+    model_name = os.getenv("MODEL_NAME", DEFAULT_MODEL_NAME).strip()
     hf_token = os.getenv("HF_TOKEN", "").strip()
     openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
     heuristic_only = os.getenv("BASELINE_MODE", "").strip().lower() == "heuristic"
@@ -85,15 +86,27 @@ def load_configuration() -> Tuple[str, str, str, str, bool, int]:
     # Accept either HF_TOKEN (hackathon instruction) or OPENAI_API_KEY (common OpenAI client pattern).
     api_token = hf_token or openai_api_key
 
+    # Ensure model is always usable even when env var is explicitly set to empty.
+    if not model_name:
+        model_name = DEFAULT_MODEL_NAME
+        logger.warning(
+            "MODEL_NAME not provided; defaulting to %s",
+            DEFAULT_MODEL_NAME,
+        )
+
+    # Fail-safe behavior for validation environments where LLM credentials are omitted.
+    # Agent can still complete tasks deterministically using heuristic action selection.
+    if not api_token and not heuristic_only:
+        heuristic_only = True
+        logger.warning(
+            "No HF_TOKEN/OPENAI_API_KEY provided; falling back to heuristic mode"
+        )
+
     errors = []
     if not llm_base_url and not heuristic_only:
         errors.append("API_BASE_URL environment variable is required unless BASELINE_MODE=heuristic")
     if not env_base_url:
         errors.append("ENV_BASE_URL environment variable is required")
-    if not model_name:
-        errors.append("MODEL_NAME environment variable is required")
-    if not api_token and not heuristic_only:
-        errors.append("Either HF_TOKEN or OPENAI_API_KEY environment variable is required unless BASELINE_MODE=heuristic")
     try:
         baseline_seed = int(baseline_seed_raw)
     except ValueError:
@@ -317,7 +330,11 @@ def identify_hard_task_opportunities(observation: Dict[str, Any]) -> list:
     opportunities = []
     for resource in observation.get("resources", []):
         is_instance = resource.get("resource_type") == "ec2_instance"
-        cpu_util = resource.get("cpu_utilization", 100.0)
+        raw_cpu_util = resource.get("cpu_utilization", 100.0)
+        try:
+            cpu_util = float(raw_cpu_util)
+        except (TypeError, ValueError):
+            cpu_util = 100.0
         is_underutilized = cpu_util < 50.0
         needs_attention = resource.get("needs_fixing", False)
 
@@ -575,9 +592,12 @@ def run_training_episode(
                         f"Reward: {step_reward:+.2f}, Total: {episode_stats['total_reward']:+.2f}"
                     )
 
+                    for completed_task in current_observation.get("completed_tasks", []):
+                        task_completion[completed_task.lower()] = True
+
                     if current_observation.get("done", False):
                         logger.info("Episode done signal received")
-                        episode_stats["success"] = True
+                        episode_stats["success"] = all(task_completion.values())
                         break
 
                 except ValueError as e:
@@ -595,7 +615,7 @@ def run_training_episode(
         # Record final stats
         episode_stats["final_cost"] = current_observation.get("monthly_cost", 0.0)
         episode_stats["cost_savings"] = max(0, episode_stats["initial_cost"] - episode_stats["final_cost"])
-        episode_stats["tasks_completed"] = [k for k, v in task_completion.items() if v]
+        episode_stats["tasks_completed"] = list(current_observation.get("completed_tasks", []))
         episode_stats["task_scores"] = {
             "easy": float(current_observation.get("progress", {}).get("easy", 0.0)),
             "medium": float(current_observation.get("progress", {}).get("medium", 0.0)),
