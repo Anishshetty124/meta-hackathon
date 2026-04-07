@@ -45,7 +45,7 @@ def example_basic_environment():
         parameters={},
     )
     
-    obs, done = env.step(action)
+    obs, reward, done, info = env.step(action)
     reward = obs.reward
     print(f"After Delete Unattached Volume:")
     print(f"  Reward: {reward:.2f}")
@@ -115,7 +115,7 @@ def example_metrics_collection():
     
     total_reward = 0.0
     for i, action in enumerate(actions_to_execute):
-        obs, done = env.step(action)
+        obs, reward, done, info = env.step(action)
         reward = obs.reward
         total_reward += reward
         
@@ -175,7 +175,7 @@ def example_error_handling():
     for test_name, command, resource_id in test_cases:
         try:
             action = Action(command=command, resource_id=resource_id, parameters={})
-            obs, done = env.step(action)
+            obs, reward, done, info = env.step(action)
             reward = obs.reward
             print(f"\n{test_name}:")
             print(f"  ✓ Success (reward={reward:.2f})")
@@ -261,7 +261,7 @@ def example_complete_episode():
     
     for task_name, command, resource_id, params in optimal_actions:
         action = Action(command=command, resource_id=resource_id, parameters=params)
-        obs, done = env.step(action)
+        obs, reward, done, info = env.step(action)
         reward = obs.reward
         total_reward += reward
         

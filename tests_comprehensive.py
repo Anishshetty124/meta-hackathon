@@ -166,7 +166,7 @@ class TestActionExecution:
             resource_id="vol-unattached-001",
             parameters={},
         )
-        obs, done = environment.step(action)
+        obs, reward, done, info = environment.step(action)
         reward = obs.reward
         
         assert reward == pytest.approx(0.35, abs=0.01)
@@ -184,7 +184,7 @@ class TestActionExecution:
             resource_id="s3-public-bucket",
             parameters={},
         )
-        obs, done = environment.step(action)
+        obs, reward, done, info = environment.step(action)
         reward = obs.reward
         
         assert reward == pytest.approx(0.50, abs=0.01)
@@ -197,7 +197,7 @@ class TestActionExecution:
             resource_id="i-expensive-prod",
             parameters={"instance_type": "t3.large"},
         )
-        obs, done = environment.step(action)
+        obs, reward, done, info = environment.step(action)
         reward = obs.reward
         
         assert reward == pytest.approx(0.60, abs=0.01)
@@ -212,7 +212,7 @@ class TestActionExecution:
             resource_id="nonexistent-id",
             parameters={},
         )
-        obs, done = environment.step(action)
+        obs, reward, done, info = environment.step(action)
         reward = obs.reward
         
         # Should return negative reward but not crash
@@ -308,7 +308,7 @@ class TestEpisodeWorkflow:
         
         total_reward = 0.0
         for action in actions:
-            obs, done = env.step(action)
+            obs, reward, done, info = env.step(action)
             reward = obs.reward
             total_reward += reward
         
