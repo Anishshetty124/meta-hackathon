@@ -52,7 +52,7 @@ def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> No
     """Emit required END line for evaluator parsing."""
     rewards_str = ",".join(f"{r:.2f}" for r in rewards) if rewards else "0.00"
     print(
-        f"[END] success={str(success).lower()} steps={steps} score={score:.2f} rewards={rewards_str}",
+        f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}",
         flush=True,
     )
 
