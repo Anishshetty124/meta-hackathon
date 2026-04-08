@@ -266,6 +266,44 @@ async def root() -> dict:
         "name": "Cloud FinOps & Security Auditor",
         "description": "OpenEnv-compatible simulator for cloud optimization",
         "version": "1.0.0",
+        "tasks": [
+            {
+                "name": "easy",
+                "difficulty": "easy",
+                "graders": [
+                    {
+                        "name": "easy_resource_deleted",
+                        "type": "deterministic",
+                        "enabled": True,
+                        "criteria": "Resource vol-unattached-001 must be deleted",
+                    }
+                ],
+            },
+            {
+                "name": "medium",
+                "difficulty": "medium",
+                "graders": [
+                    {
+                        "name": "medium_bucket_private",
+                        "type": "deterministic",
+                        "enabled": True,
+                        "criteria": "Resource s3-public-bucket must have is_public=false",
+                    }
+                ],
+            },
+            {
+                "name": "hard",
+                "difficulty": "hard",
+                "graders": [
+                    {
+                        "name": "hard_instance_rightsized",
+                        "type": "deterministic",
+                        "enabled": True,
+                        "criteria": "Resource i-expensive-prod must have instance_type=t3.large",
+                    }
+                ],
+            },
+        ],
         "endpoints": {
             "POST /reset": "Initialize or reset the environment to start an episode",
             "POST /step": "Execute an action and observe new state",
