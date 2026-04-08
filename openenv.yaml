@@ -1,5 +1,10 @@
+spec_version: 1
 name: cloud-finops-auditor
 version: 1.0.0
+type: space
+runtime: fastapi
+app: main:app
+port: 8000
 description: Cloud FinOps & Security Auditor - AI agent environment for infrastructure cost optimization and security remediation
 author: OpenEnv Hackathon Round 1
 
@@ -151,55 +156,55 @@ reward:
 tasks:
   - name: easy
     title: "Delete Unattached EBS Volume"
-    description: "Identify and delete an orphaned EBS volume (vol-unattached-001) that is not attached to any EC2 instance. This is a common cost-saving opportunity in cloud infrastructure."
+    description: "Delete orphaned volume vol-unattached-001."
     difficulty: easy
     reward: 0.35
     grader:
+      name: easy_resource_deleted
       type: deterministic
       criteria: "Resource vol-unattached-001 must be deleted (removed from resources list)"
-      success_signal: "Reward +0.35 and task marked complete"
-      target_resource: vol-unattached-001
+      score_range: [0.0, 1.0]
     graders:
-      - type: deterministic
+      - name: easy_resource_deleted
+        type: deterministic
         criteria: "Resource vol-unattached-001 must be deleted (removed from resources list)"
-        success_signal: "Reward +0.35 and task marked complete"
-        target_resource: vol-unattached-001
+        score_range: [0.0, 1.0]
     expected_steps: 1-3
     solved_by: "delete_resource command on unattached volume"
 
   - name: medium
     title: "Secure Public S3 Bucket"
-    description: "Fix a security vulnerability by making a publicly readable S3 bucket (s3-public-bucket) private. This prevents unauthorized access to potentially sensitive data."
+    description: "Make public bucket s3-public-bucket private."
     difficulty: medium
     reward: 0.50
     grader:
+      name: medium_bucket_private
       type: deterministic
       criteria: "Resource s3-public-bucket must have is_public=false"
-      success_signal: "Reward +0.50 and task marked complete"
-      target_resource: s3-public-bucket
+      score_range: [0.0, 1.0]
     graders:
-      - type: deterministic
+      - name: medium_bucket_private
+        type: deterministic
         criteria: "Resource s3-public-bucket must have is_public=false"
-        success_signal: "Reward +0.50 and task marked complete"
-        target_resource: s3-public-bucket
+        score_range: [0.0, 1.0]
     expected_steps: 1-5
     solved_by: "make_private command on public S3 bucket"
 
   - name: hard
     title: "Downsize Oversized EC2 Instance"
-    description: "Optimize an expensive EC2 instance (i-expensive-prod, currently m5.2xlarge) that is significantly underutilized (CPU <50%). The target is t3.large for safe right-sizing. Downsizing too aggressively (e.g., t3.micro/t3.small) incurs reliability-risk penalties."
+    description: "Downsize i-expensive-prod from m5.2xlarge to t3.large."
     difficulty: hard
     reward: 0.60
     grader:
+      name: hard_instance_rightsized
       type: deterministic
       criteria: "Resource i-expensive-prod must have instance_type=t3.large"
-      success_signal: "Reward +0.60 and task marked complete"
-      target_resource: i-expensive-prod
+      score_range: [0.0, 1.0]
     graders:
-      - type: deterministic
+      - name: hard_instance_rightsized
+        type: deterministic
         criteria: "Resource i-expensive-prod must have instance_type=t3.large"
-        success_signal: "Reward +0.60 and task marked complete"
-        target_resource: i-expensive-prod
+        score_range: [0.0, 1.0]
     expected_steps: 1-10
     solved_by: "downsize_instance command with new instance type parameter"
     constraints: "Instance must have cpu_utilization < 50% and needs_fixing=true; safe target for production is t3.large"
