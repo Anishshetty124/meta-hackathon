@@ -5,6 +5,7 @@ Manages environment lifecycle and coordinates agent interactions with the simula
 """
 
 import logging
+from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -12,6 +13,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uvicorn
+import yaml
 
 from server.models import ResetRequest, StepRequest, StateResponse, Observation
 from server.environment import CloudEnvironment
@@ -25,6 +27,20 @@ logger = logging.getLogger(__name__)
 
 # Global environment instance
 environment: Optional[CloudEnvironment] = None
+manifest_data: dict = {}
+
+
+def _load_manifest() -> dict:
+    """Load openenv.yaml metadata for runtime discovery endpoints."""
+    manifest_path = Path(__file__).resolve().parent / "openenv.yaml"
+    if not manifest_path.exists():
+        return {}
+    try:
+        raw = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+        return raw if isinstance(raw, dict) else {}
+    except Exception:
+        logger.warning("Failed to parse openenv.yaml for metadata endpoint", exc_info=True)
+        return {}
 
 
 @asynccontextmanager
@@ -33,9 +49,10 @@ async def lifespan(app: FastAPI):
 
     Initializes the CloudEnvironment on startup and cleans up on shutdown.
     """
-    global environment
+    global environment, manifest_data
     logger.info("Starting Cloud FinOps & Security Auditor application")
     environment = CloudEnvironment(max_steps=100)
+    manifest_data = _load_manifest()
     yield
     logger.info("Shutting down application")
     environment = None
@@ -202,6 +219,39 @@ async def health_check() -> dict:
         "environment_initialized": environment is not None,
         "application": "Cloud FinOps & Security Auditor",
         "version": "1.0.0"
+    }
+
+
+@app.get("/metadata")
+async def metadata() -> dict:
+    """Expose environment metadata, including task graders, for validators."""
+    tasks = manifest_data.get("tasks", []) if isinstance(manifest_data, dict) else []
+    return {
+        "name": manifest_data.get("name", "cloud-finops-auditor"),
+        "description": manifest_data.get(
+            "description",
+            "Cloud FinOps & Security Auditor environment",
+        ),
+        "version": manifest_data.get("version", "1.0.0"),
+        "tasks": tasks,
+    }
+
+
+@app.get("/schema")
+async def schema() -> dict:
+    """Expose action/observation/state schema for runtime validators."""
+    return {
+        "action": manifest_data.get("action", {}),
+        "observation": manifest_data.get("observation", {}),
+        "state": {
+            "type": "object",
+            "properties": {
+                "observation": {"type": "object"},
+                "episode_step": {"type": "integer"},
+                "max_steps": {"type": "integer"},
+            },
+            "required": ["observation", "episode_step", "max_steps"],
+        },
     }
 
 
