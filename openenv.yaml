@@ -159,6 +159,11 @@ tasks:
       criteria: "Resource vol-unattached-001 must be deleted (removed from resources list)"
       success_signal: "Reward +0.35 and task marked complete"
       target_resource: vol-unattached-001
+    graders:
+      - type: deterministic
+        criteria: "Resource vol-unattached-001 must be deleted (removed from resources list)"
+        success_signal: "Reward +0.35 and task marked complete"
+        target_resource: vol-unattached-001
     expected_steps: 1-3
     solved_by: "delete_resource command on unattached volume"
 
@@ -172,6 +177,11 @@ tasks:
       criteria: "Resource s3-public-bucket must have is_public=false"
       success_signal: "Reward +0.50 and task marked complete"
       target_resource: s3-public-bucket
+    graders:
+      - type: deterministic
+        criteria: "Resource s3-public-bucket must have is_public=false"
+        success_signal: "Reward +0.50 and task marked complete"
+        target_resource: s3-public-bucket
     expected_steps: 1-5
     solved_by: "make_private command on public S3 bucket"
 
@@ -185,6 +195,11 @@ tasks:
       criteria: "Resource i-expensive-prod must have instance_type=t3.large"
       success_signal: "Reward +0.60 and task marked complete"
       target_resource: i-expensive-prod
+    graders:
+      - type: deterministic
+        criteria: "Resource i-expensive-prod must have instance_type=t3.large"
+        success_signal: "Reward +0.60 and task marked complete"
+        target_resource: i-expensive-prod
     expected_steps: 1-10
     solved_by: "downsize_instance command with new instance type parameter"
     constraints: "Instance must have cpu_utilization < 50% and needs_fixing=true; safe target for production is t3.large"
