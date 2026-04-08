@@ -1,0 +1,25 @@
+{
+  "tasks": [
+    {
+      "name": "easy",
+      "difficulty": "easy",
+      "has_grader": true,
+      "grader_path": "tasks/easy/grader.py",
+      "description": "Delete unattached EBS volume vol-unattached-001"
+    },
+    {
+      "name": "medium",
+      "difficulty": "medium",
+      "has_grader": true,
+      "grader_path": "tasks/medium/grader.py",
+      "description": "Make s3-public-bucket private"
+    },
+    {
+      "name": "hard",
+      "difficulty": "hard",
+      "has_grader": true,
+      "grader_path": "tasks/hard/grader.py",
+      "description": "Downsize i-expensive-prod to t3.large"
+    }
+  ]
+}
