@@ -161,12 +161,19 @@ tasks:
     reward: 0.35
     grader:
       name: easy_resource_deleted
-      type: agent
+      type: deterministic
+      enabled: true
       criteria: "Resource vol-unattached-001 must be deleted (removed from resources list)"
       score_range: [0.0, 1.0]
     graders:
       - name: easy_resource_deleted
+        type: deterministic
+        enabled: true
+        criteria: "Resource vol-unattached-001 must be deleted (removed from resources list)"
+        score_range: [0.0, 1.0]
+      - name: easy_resource_deleted_agent
         type: agent
+        enabled: true
         criteria: "Resource vol-unattached-001 must be deleted (removed from resources list)"
         score_range: [0.0, 1.0]
     expected_steps: 1-3
@@ -179,12 +186,19 @@ tasks:
     reward: 0.50
     grader:
       name: medium_bucket_private
-      type: agent
+      type: deterministic
+      enabled: true
       criteria: "Resource s3-public-bucket must have is_public=false"
       score_range: [0.0, 1.0]
     graders:
       - name: medium_bucket_private
+        type: deterministic
+        enabled: true
+        criteria: "Resource s3-public-bucket must have is_public=false"
+        score_range: [0.0, 1.0]
+      - name: medium_bucket_private_agent
         type: agent
+        enabled: true
         criteria: "Resource s3-public-bucket must have is_public=false"
         score_range: [0.0, 1.0]
     expected_steps: 1-5
@@ -197,12 +211,19 @@ tasks:
     reward: 0.60
     grader:
       name: hard_instance_rightsized
-      type: agent
+      type: deterministic
+      enabled: true
       criteria: "Resource i-expensive-prod must have instance_type=t3.large"
       score_range: [0.0, 1.0]
     graders:
       - name: hard_instance_rightsized
+        type: deterministic
+        enabled: true
+        criteria: "Resource i-expensive-prod must have instance_type=t3.large"
+        score_range: [0.0, 1.0]
+      - name: hard_instance_rightsized_agent
         type: agent
+        enabled: true
         criteria: "Resource i-expensive-prod must have instance_type=t3.large"
         score_range: [0.0, 1.0]
     expected_steps: 1-10
