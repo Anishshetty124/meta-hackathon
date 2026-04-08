@@ -14,6 +14,22 @@ metadata:
   task_type: optimization-and-security
   difficulty: intermediate
   estimated_episode_steps: 30-100
+  tasks:
+    - name: easy
+      grader:
+        type: deterministic
+        enabled: true
+        criteria: "Resource vol-unattached-001 must be deleted (removed from resources list)"
+    - name: medium
+      grader:
+        type: deterministic
+        enabled: true
+        criteria: "Resource s3-public-bucket must have is_public=false"
+    - name: hard
+      grader:
+        type: deterministic
+        enabled: true
+        criteria: "Resource i-expensive-prod must have instance_type=t3.large"
 
 # Action space definition
 action:
