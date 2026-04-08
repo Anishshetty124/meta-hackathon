@@ -10,10 +10,19 @@ import logging
 import os
 import sys
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 import requests
-from openai import OpenAI
+try:
+    from openai import OpenAI as OpenAIClientImpl
+except Exception:  # pragma: no cover - defensive import fallback
+    OpenAIClientImpl = None
+
+if TYPE_CHECKING:
+    from openai import OpenAI as OpenAIClient
+else:
+    OpenAIClient = Any
 
 # Configure structured logging
 logging.basicConfig(
@@ -122,13 +131,16 @@ def load_configuration() -> Tuple[str, str, str, str, bool, int]:
 
     errors = []
     if not llm_base_url and not heuristic_only:
-        errors.append("API_BASE_URL environment variable is required unless BASELINE_MODE=heuristic")
+        heuristic_only = True
+        logger.warning(
+            "API_BASE_URL is empty; falling back to heuristic mode"
+        )
     if not env_base_url:
         errors.append("ENV_BASE_URL environment variable is required")
     try:
         baseline_seed = int(baseline_seed_raw)
     except ValueError:
-        errors.append("BASELINE_SEED must be an integer")
+        logger.warning("BASELINE_SEED must be an integer; defaulting to 42")
         baseline_seed = 42
 
     if errors:
@@ -142,7 +154,7 @@ def load_configuration() -> Tuple[str, str, str, str, bool, int]:
     return env_base_url, llm_base_url, model_name, api_token, heuristic_only, baseline_seed
 
 
-def create_openai_client(model_name: str, api_token: str, llm_base_url: str) -> OpenAI:
+def create_openai_client(model_name: str, api_token: str, llm_base_url: str) -> Optional[OpenAIClient]:
     """Create OpenAI-compatible client for HuggingFace inference API.
 
     Configures the client to use HuggingFace's OpenAI-compatible endpoint
@@ -154,7 +166,7 @@ def create_openai_client(model_name: str, api_token: str, llm_base_url: str) -> 
         llm_base_url: OpenAI-compatible LLM endpoint
 
     Returns:
-        Configured OpenAI client instance
+        Configured OpenAI client instance, or None if initialization fails
 
     Raises:
         ValueError: If credentials are invalid or missing
@@ -162,12 +174,76 @@ def create_openai_client(model_name: str, api_token: str, llm_base_url: str) -> 
     if not api_token or not model_name:
         raise ValueError("Model name and HuggingFace token are required")
 
-    client = OpenAI(
-        api_key=api_token,
-        base_url=llm_base_url,
-    )
-    logger.debug(f"OpenAI client created for model {model_name}")
-    return client
+    class _RequestsChatCompletions:
+        def __init__(self, base_url: str, token: str) -> None:
+            self.base_url = base_url.rstrip("/")
+            self.token = token
+
+        def create(
+            self,
+            model: str,
+            messages: List[Dict[str, str]],
+            max_tokens: int = LLM_MAX_TOKENS,
+            temperature: float = 0.2,
+            stream: bool = False,
+        ) -> Any:
+            url = f"{self.base_url}/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {self.token}",
+                "Content-Type": "application/json",
+            }
+            payload = {
+                "model": model,
+                "messages": messages,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "stream": stream,
+            }
+
+            response = requests.post(
+                url,
+                headers=headers,
+                json=payload,
+                timeout=API_REQUEST_TIMEOUT,
+            )
+            response.raise_for_status()
+            data = parse_json_response(response, "POST /chat/completions")
+            choices = data.get("choices", [])
+            if not isinstance(choices, list) or not choices:
+                raise ValueError("LLM response missing choices")
+
+            first_choice = choices[0] if isinstance(choices[0], dict) else {}
+            message = first_choice.get("message", {}) if isinstance(first_choice, dict) else {}
+            content = message.get("content", "") if isinstance(message, dict) else ""
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=content))]
+            )
+
+    class _RequestsOpenAICompatClient:
+        def __init__(self, base_url: str, token: str) -> None:
+            self.chat = SimpleNamespace(completions=_RequestsChatCompletions(base_url, token))
+
+    try:
+        if OpenAIClientImpl is None:
+            raise RuntimeError("OpenAI SDK unavailable")
+
+        client = OpenAIClientImpl(
+            api_key=api_token,
+            base_url=llm_base_url,
+        )
+        logger.debug(f"OpenAI client created for model {model_name}")
+        return client
+    except TypeError as e:
+        # Some runtime combos (openai/httpx versions) fail during client init
+        # (for example, unexpected 'proxies' keyword errors).
+        logger.warning(
+            "OpenAI SDK init compatibility issue, using requests fallback client: %s",
+            e,
+        )
+        return _RequestsOpenAICompatClient(llm_base_url, api_token)
+    except Exception as e:
+        logger.warning("OpenAI SDK init failed, using requests fallback client: %s", e)
+        return _RequestsOpenAICompatClient(llm_base_url, api_token)
 
 
 def reset_environment(api_base_url: str, seed: Optional[int] = None) -> Dict[str, Any]:
@@ -368,7 +444,7 @@ def identify_hard_task_opportunities(observation: Dict[str, Any]) -> list:
 
 
 def get_model_recommendation(
-    client: OpenAI,
+    client: OpenAIClient,
     model_name: str,
     observation: Dict[str, Any],
     task_completion: Dict[str, bool],
@@ -497,7 +573,7 @@ def select_heuristic_action(
 
 def run_training_episode(
     env_base_url: str,
-    client: Optional[OpenAI],
+    client: Optional[OpenAIClient],
     model_name: str,
     episode_number: int,
     max_steps: int,
@@ -692,14 +768,35 @@ def main() -> int:
         ) = load_configuration()
 
         # Create client unless explicitly running deterministic heuristic baseline.
-        client: Optional[OpenAI] = None
+        client: Optional[OpenAIClient] = None
         if not heuristic_only:
-            client = create_openai_client(model_name, api_token, llm_base_url)
+            try:
+                client = create_openai_client(model_name, api_token, llm_base_url)
+            except Exception as e:  # pragma: no cover - fail-safe for runtime version skew
+                client = None
+                logger.warning(
+                    "LLM client initialization failed unexpectedly, using heuristic mode: %s",
+                    e,
+                )
+
+            if client is None:
+                heuristic_only = True
+                logger.warning(
+                    "Falling back to heuristic mode because LLM client could not be initialized"
+                )
         else:
             logger.info("Running in heuristic-only baseline mode (BASELINE_MODE=heuristic)")
 
         # Run training episodes
-        num_episodes = int(os.getenv("NUM_EPISODES", "1"))
+        num_episodes_raw = os.getenv("NUM_EPISODES", "1").strip()
+        try:
+            num_episodes = int(num_episodes_raw)
+        except ValueError:
+            logger.warning("NUM_EPISODES must be an integer; defaulting to 1")
+            num_episodes = 1
+        if num_episodes <= 0:
+            logger.warning("NUM_EPISODES must be > 0; defaulting to 1")
+            num_episodes = 1
         logger.info(f"Starting {num_episodes} training episodes")
 
         episode_results = []
