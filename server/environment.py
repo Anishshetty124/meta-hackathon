@@ -69,6 +69,8 @@ class CloudEnvironment:
         TaskType.MEDIUM: 0.50,
         TaskType.HARD: 0.60,
     }
+    MIN_TASK_SCORE = 0.01
+    MAX_TASK_SCORE = 0.99
 
     def __init__(self, seed: Optional[int] = None, max_steps: int = 100) -> None:
         """Initialize the cloud environment.
@@ -130,7 +132,7 @@ class CloudEnvironment:
 
         # Reset task progress
         for task_type in TaskType:
-            self.task_progress[task_type].progress = 0.0
+            self.task_progress[task_type].progress = self.MIN_TASK_SCORE
             self.task_progress[task_type].completed = False
 
         logger.info(
@@ -428,7 +430,7 @@ class CloudEnvironment:
                 cost_saved = resource.monthly_cost
                 del self.resources[resource.resource_id]
 
-                self.task_progress[TaskType.EASY].progress = 1.0
+                self.task_progress[TaskType.EASY].progress = self.MAX_TASK_SCORE
                 self.task_progress[TaskType.EASY].completed = True
 
                 reward = self.TASK_REWARDS[TaskType.EASY]
@@ -474,7 +476,7 @@ class CloudEnvironment:
                 resource.is_public = False
                 resource.needs_fixing = False
 
-                self.task_progress[TaskType.MEDIUM].progress = 1.0
+                self.task_progress[TaskType.MEDIUM].progress = self.MAX_TASK_SCORE
                 self.task_progress[TaskType.MEDIUM].completed = True
 
                 reward = self.TASK_REWARDS[TaskType.MEDIUM]
@@ -552,7 +554,7 @@ class CloudEnvironment:
         # Award reward based on which instance was downsized
         if resource.resource_id == "i-expensive-prod":
             # Downsized the specific expensive instance - Hard task complete
-            self.task_progress[TaskType.HARD].progress = 1.0
+            self.task_progress[TaskType.HARD].progress = self.MAX_TASK_SCORE
             self.task_progress[TaskType.HARD].completed = True
             reward = self.TASK_REWARDS[TaskType.HARD]
             info["task_completed"] = "hard"
@@ -563,7 +565,7 @@ class CloudEnvironment:
         else:
             # Downsized other instance - partial credit for Hard task
             self.task_progress[TaskType.HARD].progress = min(
-                1.0,
+                self.MAX_TASK_SCORE,
                 self.task_progress[TaskType.HARD].progress + 0.25,
             )
             reward = 0.25
@@ -658,9 +660,12 @@ class CloudEnvironment:
         return shaped_reward, shaping_info
 
     def _task_scorecard(self) -> Dict[str, float]:
-        """Return deterministic task scores between 0.0 and 1.0."""
+        """Return deterministic task scores strictly inside (0, 1)."""
         return {
-            task_type.value: round(task.progress, 3)
+            task_type.value: round(
+                min(self.MAX_TASK_SCORE, max(self.MIN_TASK_SCORE, task.progress)),
+                3,
+            )
             for task_type, task in self.task_progress.items()
         }
 
